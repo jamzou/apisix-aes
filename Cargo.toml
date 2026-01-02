@@ -7,4 +7,6 @@ crate-type = ["cdylib"] # 生成 .so 文件
 [dependencies]
 aes = "0.8.4"
 ecb = "0.1.2"
-hex = "0.4.3" # 可选，用于调试
+const-hex = "1.17.0" # 可选，用于调试
+md-5 = "0.10.6"
+base64 = "0.22.1"
