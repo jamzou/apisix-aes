@@ -20,6 +20,18 @@ cargo test -- --nocapture
 打包：
 ```bash
 cargo build --release
+# 使用cargo vendor
+cargo vendor
+mkdir -p .cargo
+# 写入./cargo/config.tml
+cat > .cargo/config.toml << EOF
+[source.crates-io]
+replace-with = "vendored-sources"
+
+[source.vendored-sources]
+directory = "vendor"
+EOF
+cargo build --frozen
 ```
 
 常见问题：

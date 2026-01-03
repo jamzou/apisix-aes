@@ -1,0 +1,18 @@
+{
+  "lsp": {
+    "rust-analyzer": {
+      "initialization_options": {
+        "rust-analyzer": {
+          "inlayHints": {
+            "typeHints": { "enable": true },
+            "closureReturnTypeHints": { "enable": "always" },
+            "lifetimeElisionHints": {
+              "enable": "skip_trivial",
+              "useParameterNames": true,
+            },
+          },
+        },
+      },
+    },
+  },
+}

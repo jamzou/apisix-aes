@@ -10,3 +10,4 @@ ecb = "0.1.2"
 const-hex = "1.17.0" # 可选，用于调试
 md-5 = "0.10.6"
 base64 = "0.22.1"
+cipher = {version = "0.4.3", features=["block-padding"]}

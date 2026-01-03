@@ -3,19 +3,64 @@ use base64::prelude::*;
 use md5::{Digest, Md5};
 use std::ffi::{CStr, CString};
 use std::os::raw::c_char;
+mod myaes;
 
 type Aes128EcbEnc = ecb::Encryptor<aes::Aes128>;
 type Aes128EcbDec = ecb::Decryptor<aes::Aes128>;
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
 
     #[test]
-    fn it_works() {
+    fn test_my_aes() {
+        // let k1 = "1234567812345678";
+        // let key_test = GenericArray::from_slice(k1.as_bytes());
+        // let key_test:GenericArray<u8, U16> = GenericArray::from_slice(k1.as_bytes()).clone();
+        let plaintext = "ehomeehomeehome1";
+        let key = "1234567812345678";
+        let ciphertext = myaes::my_aes_encrypt(plaintext, key);
+        println!("ciphertext: {}", ciphertext);
+        let decrypted_text = myaes::my_aes_decrypt(&ciphertext, key);
+        println!("decrypted_text: {}", decrypted_text);
+        assert_eq!(plaintext, decrypted_text);
+
+        let source_cstring = CString::new(plaintext.to_owned()).unwrap();
+        let cstr_source = source_cstring.as_ptr();
+        let key_cstring = CString::new(key.to_owned()).unwrap();
+        let cstr_key = key_cstring.as_ptr();
+
+        let encrypted_res = ehome_aes_encrypt_for_eim(cstr_source, cstr_key);
+        let char_u8 = mut_ptr_to_u8(encrypted_res);
+        let s = String::from_utf8(char_u8).unwrap();
+        println!("ciphertext 222: {}", s);
+        assert_eq!(ciphertext, s);
+    }
+
+    #[test]
+    fn ehome_aes_encrypt_decrypt() {
+        let source = "helloworld";
+        let key = "1234567812345678";
+        let source_cstring = CString::new(source.to_owned()).unwrap();
+        let cstr_source = source_cstring.as_ptr();
+        let key_cstring = CString::new(key.to_owned()).unwrap();
+        let cstr_key = key_cstring.as_ptr();
+
+        let encrypted_res = ehome_aes_encrypt(cstr_source, cstr_key);
+        let decrypted_res = ehome_aes_decrypt(encrypted_res, cstr_key);
+        let decrypted_num_vec = mut_ptr_to_u8(decrypted_res);
+        assert_eq!(source.as_bytes(), decrypted_num_vec.as_slice());
+        free_buffer(encrypted_res);
+        free_buffer(decrypted_res);
+    }
+
+    #[test]
+    fn aes128_ecb_encrypt_decrypt() {
         // 创建包含 "hello" 的 C 字符串
-        let plaintext_cstr = std::ffi::CString::new("hello").unwrap();
-        let key_cstr = std::ffi::CString::new("461595e4bdb090ce41e7818287954d86").unwrap();
+        let source = "hello world";
+        let plaintext_cstr = CString::new(source.to_owned()).unwrap();
+        let key_cstr = CString::new("461595e4bdb090ce41e7818287954d86").unwrap();
 
         let plaintext: *const c_char = plaintext_cstr.as_ptr();
         let key_hex: *const c_char = key_cstr.as_ptr();
@@ -27,17 +72,52 @@ mod tests {
         unsafe {
             let c_str = CStr::from_ptr(pt);
             let bytes = c_str.to_bytes();
-
             // 输出16进制字符
-            print!("Encrypted result in hex: ");
-            for byte in bytes {
-                print!("{:02x}", byte);
-            }
-            println!();
-
+            print!("Encrypted result in hex: {}", const_hex::encode(bytes));
+            //解密
+            let ciphertext = std::ffi::CString::new(bytes).unwrap();
+            let ct_ptr = ciphertext.as_ptr();
+            let decrypted_source = aes128_ecb_decrypt(ct_ptr, key_hex);
+            let decrypted_num_vec = mut_ptr_to_u8(decrypted_source);
+            assert_eq!(decrypted_num_vec.as_slice(), source.as_bytes());
             // 释放内存
             free_buffer(pt);
+            free_buffer(decrypted_source);
         }
+    }
+
+    #[test]
+    fn eim_aes_encrypt_decrypt() {
+        let source = "helloworld";
+        let key = "1234567812345678";
+        let source_cstring = CString::new(source.to_owned()).unwrap();
+        let cstr_source = source_cstring.as_ptr();
+        let key_cstring = CString::new(key.to_owned()).unwrap();
+        let cstr_key = key_cstring.as_ptr();
+
+        let encrypted_res = ehome_aes_encrypt_for_eim(cstr_source, cstr_key);
+        let decrypted_res = ehome_aes_decrypt_for_eim(encrypted_res, cstr_key);
+        let decrypted_num_vec = mut_ptr_to_u8(decrypted_res);
+        assert_eq!(source.as_bytes(), decrypted_num_vec.as_slice());
+        free_buffer(encrypted_res);
+        free_buffer(decrypted_res);
+    }
+
+    fn mut_ptr_to_u8(c_str: *mut i8) -> Vec<u8> {
+        let mut num_vec = vec![];
+        let mut i = 0;
+        unsafe {
+            loop {
+                let n = *c_str.add(i) as u8;
+                if n == b'\0' {
+                    break;
+                } else {
+                    num_vec.push(n);
+                }
+                i += 1;
+            }
+        }
+        num_vec
     }
 }
 
@@ -85,14 +165,23 @@ pub extern "C" fn aes128_ecb_encrypt(
     bytes_to_cstring(&ct)
 }
 
+#[unsafe(no_mangle)]
+pub extern "C" fn aes128_ecb_decrypt(
+    ciphertext: *const c_char,
+    key_hex: *const c_char,
+) -> *mut c_char {
+    let ct: Vec<u8> = unsafe { c_str_to_bytes(ciphertext) };
+    let key_hex_str: Vec<u8> = unsafe { c_str_to_bytes(key_hex) };
+    let key = const_hex::decode(&key_hex_str).unwrap_or_default();
+    let pt = aes128_decrypt_core(&ct, &key);
+    bytes_to_cstring(&pt)
+}
+
 /// ehome_aes_encrypt
 /// 先将字符串key转为md5，然后用md5的16字节作为key进行aes128-ecb加密
 /// 加密成功返回base64字符串，加密失败返回空字符串
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn ehome_aes_encrypt(
-    plaintext: *const c_char,
-    key: *const c_char,
-) -> *mut c_char {
+pub extern "C" fn ehome_aes_encrypt(plaintext: *const c_char, key: *const c_char) -> *mut c_char {
     let pt: Vec<u8> = unsafe { c_str_to_bytes(plaintext) };
     let key_str = unsafe { c_str_to_bytes(key) };
     let mut hasher = Md5::new();
@@ -105,10 +194,8 @@ pub unsafe extern "C" fn ehome_aes_encrypt(
 
 /// ehome_aes_decrypt
 /// 用key进行md5, ciphertext进行base64解码，再用aes128-ecb解密
-pub unsafe extern "C" fn ehome_aes_decrypt(
-    ciphertext: *const c_char,
-    key: *const c_char,
-) -> *mut c_char {
+#[unsafe(no_mangle)]
+pub extern "C" fn ehome_aes_decrypt(ciphertext: *const c_char, key: *const c_char) -> *mut c_char {
     let ct: Vec<u8> = unsafe { c_str_to_bytes(ciphertext) };
     let key_str = unsafe { c_str_to_bytes(key) };
     let mut hasher = Md5::new();
@@ -122,7 +209,8 @@ pub unsafe extern "C" fn ehome_aes_decrypt(
 /// ehome_aes_encrypt
 /// 用16字节的key进行aes128-ecb加密
 /// 加密成功返回base64字符串，加密失败返回空字符串
-pub unsafe extern "C" fn ehome_aes_encrypt_for_eim(
+#[unsafe(no_mangle)]
+pub extern "C" fn ehome_aes_encrypt_for_eim(
     plaintext: *const c_char,
     key: *const c_char,
 ) -> *mut c_char {
@@ -136,7 +224,8 @@ pub unsafe extern "C" fn ehome_aes_encrypt_for_eim(
 /// ehome_aes_decrypt
 /// 用16字节的key, ciphertext经过base64解码，进行aes128-ecb解密
 /// 解密成功返回字符串，解密失败返回空字符串
-pub unsafe extern "C" fn ehome_aes_decrypt_for_eim(
+#[unsafe(no_mangle)]
+pub extern "C" fn ehome_aes_decrypt_for_eim(
     ciphertext: *const c_char,
     key: *const c_char,
 ) -> *mut c_char {
@@ -166,18 +255,6 @@ fn aes128_decrypt_core(ct: &[u8], key: &[u8]) -> Vec<u8> {
         .decrypt_padded_b2b_mut::<Pkcs7>(ct, &mut buf)
         .unwrap_or(b"");
     pt.to_owned()
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn aes128_ecb_decrypt(
-    ciphertext: *const c_char,
-    key_hex: *const c_char,
-) -> *mut c_char {
-    let ct: Vec<u8> = unsafe { c_str_to_bytes(ciphertext) };
-    let key_hex_str: Vec<u8> = unsafe { c_str_to_bytes(key_hex) };
-    let key = const_hex::decode(&key_hex_str).unwrap_or_default();
-    let pt = aes128_decrypt_core(&ct, &key);
-    bytes_to_cstring(&pt)
 }
 
 // 注意：Lua 需要负责释放返回的内存（或我们设计成不释放，由 Rust 管理）
